@@ -16,7 +16,8 @@ cimport cython
 # ------------------- Face functions --------------------------------------------------------------------------
 cdef double sourcePotential(double[:] p_g, double[:] p0, double[:, :] verts, double[:] l, double[:] m, double[:] n, int nrEdges):
 	cdef int i, j, i2
-	cdef double S, phi, A, B, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL
+	cdef double S, phi, A, B, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL, det, al, bl, am, bm
+	cdef double error = 0.00000001
 
 	cdef double s[3]
 	cdef double a[3]
@@ -65,14 +66,28 @@ cdef double sourcePotential(double[:] p_g, double[:] p0, double[:, :] verts, dou
 			RNUM = SM*PN*(B*PA - A*PB)
 			DNOM = PA*PB + PN*PN*A*B*SM*SM
 
-			if (PN == 0 and DNOM < 0):
-				C = -M_PI
-			elif (PN == 0 and DNOM == 0):
-				C = -0.5*M_PI
-			elif (PN == 0 and DNOM > 0):
-				C = 0.0
+			if fabs(PN) < error:
+				# Find out if ctrl point is located to the left or right of line
+				PL = p[0]*l[0] + p[1]*l[1] + p[2]*l[2]
+				PM = p[0]*m[0] + p[1]*m[1] + p[2]*m[2]
+				al = p1[0]*l[0] + p1[1]*l[1] + p1[2]*l[2]
+				bl = p2[0]*l[0] + p2[1]*l[1] + p2[2]*l[2]
+				am = p1[0]*m[0] + p1[1]*m[1] + p1[2]*m[2]
+				bm = p2[0]*m[0] + p2[1]*m[1] + p2[2]*m[2]
+
+				det = (al - PL)*(bm - PM) - (bl - PL)*(am - PM)
+
+				if DNOM < 0:
+					C = -M_PI                                    
+				elif fabs(DNOM) < error: 
+					C = -0.5*M_PI                               
+				elif DNOM > 0:
+					C = 0.0
+
+				if det < 0:
+					C = -C
 			else:
-				C = atan2(RNUM, DNOM)
+				C = atan(RNUM/DNOM)
 
 			GL = (1/S)*log(fabs((A+B+S)/(A+B-S)))
 
@@ -82,7 +97,8 @@ cdef double sourcePotential(double[:] p_g, double[:] p0, double[:, :] verts, dou
 
 cdef double doubletPotential(double[:] p_g, double[:] p0, double[:, :] verts, double[:] l, double[:] m, double[:] n, int nrEdges):
 	cdef int i, j
-	cdef double S, phi, A, B, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL, abs_var
+	cdef double S, phi, A, B, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL, det, al, bl, am, bm
+	cdef double error = 0.00000001
 
 	cdef double s[3]
 	cdef double a[3]
@@ -131,14 +147,28 @@ cdef double doubletPotential(double[:] p_g, double[:] p0, double[:, :] verts, do
 			RNUM = SM*PN*(B*PA - A*PB)
 			DNOM = PA*PB + PN*PN*A*B*SM*SM
 
-			if (PN == 0 and DNOM < 0):
-				C = -M_PI
-			elif (PN == 0 and DNOM == 0):
-				C = -0.5*M_PI
-			elif (PN == 0 and DNOM > 0):
-				C = 0.0
+			if fabs(PN) < error:
+				# Find out if ctrl point is located to the left or right of line
+				PL = p[0]*l[0] + p[1]*l[1] + p[2]*l[2]
+				PM = p[0]*m[0] + p[1]*m[1] + p[2]*m[2]
+				al = p1[0]*l[0] + p1[1]*l[1] + p1[2]*l[2]
+				bl = p2[0]*l[0] + p2[1]*l[1] + p2[2]*l[2]
+				am = p1[0]*m[0] + p1[1]*m[1] + p1[2]*m[2]
+				bm = p2[0]*m[0] + p2[1]*m[1] + p2[2]*m[2]
+
+				det = (al - PL)*(bm - PM) - (bl - PL)*(am - PM)
+
+				if DNOM < 0:
+					C = M_PI                                    
+				elif fabs(DNOM) < error: 
+					C = 0.5*M_PI                               
+				elif DNOM > 0:
+					C = 0.0
+
+				if det < 0:
+					C = -C
 			else:
-				C = atan2(RNUM, DNOM)
+				C = atan(RNUM/DNOM) 
 
 			phi += C
 
@@ -146,7 +176,7 @@ cdef double doubletPotential(double[:] p_g, double[:] p0, double[:, :] verts, do
 
 cdef double[:] sourceVelocity(double[:] p_g, double[:] p0, double[:, :] verts, double[:] l, double[:] m, double[:] n, int nrEdges):
 	cdef int i, j
-	cdef double S, phi, A, B, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL
+	cdef double S, phi, A, B, PL, PM, PN, SL, SM, AL, AM, Al, PA, PB, RNUM, DNOM, C, GL, det, al, bl, am, bm
 	cdef double error = 0.00000001
 
 	cdef double u[3]
@@ -199,14 +229,28 @@ cdef double[:] sourceVelocity(double[:] p_g, double[:] p0, double[:, :] verts, d
 			RNUM = SM*PN*(B*PA - A*PB)
 			DNOM = PA*PB + PN*PN*A*B*SM*SM
 
-			if (fabs(PN) < error and DNOM < 0):
-				C = M_PI
-			elif (fabs(PN) < error and fabs(DNOM) < error):
-				C = 0.5*M_PI
-			elif (fabs(PN) < error and DNOM > 0):
-				C = 0.0
+			if fabs(PN) < error:
+				# Find out if ctrl point is located to the left or right of line
+				PL = p[0]*l[0] + p[1]*l[1] + p[2]*l[2]
+				PM = p[0]*m[0] + p[1]*m[1] + p[2]*m[2]
+				al = p1[0]*l[0] + p1[1]*l[1] + p1[2]*l[2]
+				bl = p2[0]*l[0] + p2[1]*l[1] + p2[2]*l[2]
+				am = p1[0]*m[0] + p1[1]*m[1] + p1[2]*m[2]
+				bm = p2[0]*m[0] + p2[1]*m[1] + p2[2]*m[2]
+
+				det = (al - PL)*(bm - PM) - (bl - PL)*(am - PM)
+
+				if DNOM < 0:
+					C = M_PI                                    
+				elif fabs(DNOM) < error: 
+					C = 0.5*M_PI                               
+				elif DNOM > 0:
+					C = 0.0
+
+				if det < 0:
+					C = -C
 			else:
-				C = atan(RNUM/DNOM)
+				C = atan(RNUM/DNOM)                           
 	 	
 			GL = (1/S)*log(fabs((A+B+S)/(A+B-S)))
 
