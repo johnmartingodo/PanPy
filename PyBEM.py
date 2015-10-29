@@ -47,7 +47,6 @@ class PyBEM():
 			i_stop  = i_start + ctrlMesh.nrFaces
 			j_start = 0
 
-
 			for j in range(self.nrPanelObjects):
 				mesh = self.panelObjects[j].mesh
 				j_stop = j_start + mesh.nrFaces
@@ -74,9 +73,9 @@ class PyBEM():
 				if panelObject.liftingSurface:
 					panelObject.source_strength = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)/(4*np.pi)
 					A_source                    = Computation.influenceMatrix(ctrlMesh, ctrlMesh, 'sourcePotential')
-					b[i_start:i_stop]           = np.dot(A_source, panelObject.source_strength)
+					b[i_start:i_stop]           = -np.dot(A_source, panelObject.source_strength)
 				else:
-					b[i_start:i_stop] = -Computation.freeStreamPotential(self.Uinf, ctrlMesh)
+					b[i_start:i_stop] = Computation.freeStreamPotential(self.Uinf, ctrlMesh)
 
 			elif panelObject.boundaryType == 'newmann':
 				b[i_start:i_stop] = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)
