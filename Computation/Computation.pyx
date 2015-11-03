@@ -16,21 +16,48 @@ cimport cython
 # ------------------- Face functions --------------------------------------------------------------------------
 cdef double sourcePotential(double[:] p, double[:] p0, double[:, :] verts, double [:] n, double A, int nrEdges):
 	cdef int i, j, i_l, i_r
-	cdef double faceLength, distance, ratio, phi
+	cdef double faceLength, distance, ratio, phi, r1, r2, d
 	cdef double u[3]
+	cdef double error = -1
 
 	cdef double p1[3]
 	cdef double p2[3]
 	cdef double p3[3]
 	cdef double p4[3]
 	cdef double p0_n[3]
+	cdef double r1xd[3]
+	cdef double r1xd_n
 
 	faceLength = sqrt(A)
 	distance   = sqrt((p[0] - p0[0])**2 + (p[1] - p0[1])**2 + (p[2] - p0[2])**2)
 	ratio      = distance/faceLength
 
-	if ratio > 3:
-		phi = -A/sqrt((p[0] - p0[0])**2 + (p[1] - p0[1])**2 + (p[2] - p0[2])**2)
+	if distance <= error:
+		phi = 0
+
+		for i in range(nrEdges):
+			if i == nrEdges - 1:
+				i_r = 0
+			else:
+				i_r = i + 1
+
+			for j in range(3):
+				p1[j] = verts[i, j]
+				p2[j] = verts[i_r, j]
+
+			r1 = sqrt((p[0] - p1[0])**2 + (p[1] - p1[1])**2 + (p[2] - p1[2])**2)
+			r2 = sqrt((p[0] - p2[0])**2 + (p[1] - p2[1])**2 + (p[2] - p2[2])**2)
+			d  = sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2 + (p2[2] - p1[2])**2)
+
+			r1xd[0] =  (p[1] - p1[1])*(p2[2] - p1[2]) - (p[2] - p1[2])*(p2[1] - p1[1])
+			r1xd[1] = -(p[0] - p1[0])*(p2[1] - p1[1]) + (p[1] - p1[1])*(p2[0] - p1[0])
+			r1xd[2] =  (p[0] - p1[0])*(p2[1] - p1[1]) - (p[1] - p1[1])*(p2[0] - p1[0])
+
+			r1xd_n = r1xd[0]*n[0] + r1xd[1]*n[1] + r1xd[2]*n[2]
+			phi += -(r1xd_n/d)*log((r1 + r2 + d)/(r1 + r2 - d))
+
+	elif ratio >= 5:
+		phi = -A/distance
 	else:
 		phi = 0
 
@@ -58,25 +85,27 @@ cdef double sourcePotential(double[:] p, double[:] p0, double[:, :] verts, doubl
 
 	return phi
 
-cdef double doubletPotential(double[:] p, double[:] p0, double[:, :] verts, double A, int nrEdges):
+cdef double doubletPotential(double[:] p, double[:] p0, double[:, :] verts, double [:] n, double A, int nrEdges):
 	cdef int i, j, i_l, i_r
-	cdef double faceLength, distance, ratio, phi
+	cdef double faceLength, distance, ratio, phi, pn
 	cdef double u[3]
+	cdef double error = 0.0000001
 
 	cdef double p1[3]
 	cdef double p2[3]
 	cdef double p3[3]
 	cdef double p4[3]
 	cdef double p0_n[3]
-
+	
 	faceLength = sqrt(A)
 	distance   = sqrt((p[0] - p0[0])**2 + (p[1] - p0[1])**2 + (p[2] - p0[2])**2)
 	ratio      = distance/faceLength
 
-	if distance == 0:
+	if distance <= error:
 		phi = -2*M_PI
-	elif ratio > 3:
-		phi = -A*(p[2] - p0[2])*pow_c((p[0] - p0[0])**2 + (p[1] - p0[1])**2 + (p[2] - p0[2])**2, -1.5)
+	elif ratio > 5:
+		pn = (p[0] - p0[0])*n[0] + (p[1] - p0[1])*n[1] + (p[2] - p0[2])*n[2]
+		phi = -A*pn/distance**3
 	else:
 		phi = 0
 
@@ -98,7 +127,9 @@ cdef double doubletPotential(double[:] p, double[:] p0, double[:, :] verts, doub
 
 				p0_n[j] = 0.25*(p1[j] + p2[j] + p3[j] + p4[j])
 
-			phi += -A*(p[2] - p0[2])*pow_c((p[0] - p0_n[0])**2 + (p[1] - p0_n[1])**2 + (p[2] - p0_n[2])**2, -1.5)
+			pn = (p[0] - p0_n[0])*n[0] + (p[1] - p0_n[1])*n[1] + (p[2] - p0_n[2])*n[2]
+			distance = sqrt((p[0] - p0_n[0])**2 + (p[1] - p0_n[1])**2 + (p[2] - p0_n[2])**2)
+			phi += -A*pn/distance**3
 
 		phi /= nrEdges
 
@@ -123,8 +154,8 @@ cdef double[:] sourceVelocity(double[:] p, double[:] p0, double[:, :] verts, dou
 		u[0] = 2*M_PI*n[0]
 		u[1] = 2*M_PI*n[1]
 		u[2] = 2*M_PI*n[2]
-	elif ratio > 3:
-		C = A*pow_c((p[0] - p0[0])**2 + (p[1] - p0[1])**2 + (p[2] - p0[2])**2, -1.5)
+	elif ratio > 5:
+		C = A/distance**3
 
 		u[0] = C*(p[0] - p0[0])
 		u[1] = C*(p[1] - p0[1])
@@ -150,7 +181,7 @@ cdef double[:] sourceVelocity(double[:] p, double[:] p0, double[:, :] verts, dou
 
 				p0_n[j] = 0.25*(p1[j] + p2[j] + p3[j] + p4[j])
 
-			C = A*pow_c((p[0] - p0_n[0])**2 + (p[1] - p0_n[1])**2 + (p[2] - p0_n[2])**2, -1.5)
+			C = A/pow_c((p[0] - p0_n[0])**2 + (p[1] - p0_n[1])**2 + (p[2] - p0_n[2])**2, 1.5)
 
 			u[0] += C*(p[0] - p0_n[0])
 			u[1] += C*(p[1] - p0_n[1])
@@ -240,9 +271,9 @@ def influenceMatrix(Mesh ctrlMesh, Mesh mesh, panelType):
 
 		for i in range(nrRows):
 			if type_nr == 0:
-				A[i, j] = sourcePotential(ctrlMesh.face_center[i], mesh.face_center[j], verts, mesh.face_n[j], mesh.face_area[j], nrEdges)
+				A[i, j] =  sourcePotential(ctrlMesh.face_center[i], mesh.face_center[j], verts, mesh.face_n[j], mesh.face_area[j], nrEdges)
 			elif type_nr == 1:
-				A[i, j] = doubletPotential(ctrlMesh.face_center[i], mesh.face_center[j], verts, mesh.face_area[j], nrEdges)
+				A[i, j] = doubletPotential(ctrlMesh.face_center[i], mesh.face_center[j], verts, mesh.face_n[j], mesh.face_area[j], nrEdges)
 			elif type_nr == 2:
 				u       = sourceVelocity(ctrlMesh.face_center[i], mesh.face_center[j], verts, mesh.face_n[j], mesh.face_area[j], nrEdges)
 				A[i, j] = u[0]*ctrlMesh.face_n[i, 0] + u[1]*ctrlMesh.face_n[i, 1] + u[2]*ctrlMesh.face_n[i, 2]
@@ -309,3 +340,20 @@ def velocity(double[:, :] p, double[:] strength, Mesh mesh, panelType):
 			u[i, 2] = u[i, 2] + strength[j]*u_temp[2]
 
 	return np.asarray(u)
+
+def reduceToStrips(double[:, :] A, int nrStrips, int nrPanelsPrStrip, int nrCtrlPoints):
+	cdef int i, j, k, j_start, j_stop
+	
+	cdef double[:, :] A_strips = np.zeros((nrCtrlPoints, nrStrips), dtype=np.double)
+
+	for i in range(nrCtrlPoints):
+		j_start = 0
+		for j in range(nrStrips):
+			j_stop = j_start + nrPanelsPrStrip
+
+			for k in range(j_start, j_stop):
+				A_strips[i, j] += A[i, k]
+
+			j_start += nrPanelsPrStrip
+
+	return np.asarray(A_strips)

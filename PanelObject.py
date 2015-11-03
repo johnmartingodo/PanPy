@@ -6,7 +6,6 @@ class PanelObject():
 	def __init__(self, mesh):
 		# Geometry data
 		self.mesh = mesh
-		self.mesh.calculateFaceCoordinateSystem()
 
 		# Boundary condition type
 		self.boundaryType = 'dirichlet'
@@ -30,14 +29,18 @@ class PanelObject():
 		
 		# Default wake settings
 		self.wake_nrStrips        = len(self.trailingEdge)
-		self.wake_length          = 10
+		self.wake_length          = 20
 		self.wake_panelLength     = 1
 		self.wake_nrPanelsPrStrip = int(np.ceil(self.wake_length/self.wake_panelLength))
 		self.wake_nrVertsPrStrip  = self.wake_nrPanelsPrStrip + 1
 		self.wake_trailingVerts   = np.zeros((self.wake_nrStrips, 2), dtype=np.int)
 
+
+		# List of faces which are connected to the trailing edge. Maximum two
+		self.trailingFaces = -np.ones((self.wake_nrStrips, 2), dtype=np.int)
+
 		# Find trailing edge vertices
-		self.trailingVerts      = np.array([]) # Index of vertices in wing mesh at the trailing edge
+		self.trailingVerts = np.array([]) # Index of vertices in wing mesh at the trailing edge
 
 		for i in range(self.wake_nrStrips):
 			# Look up verts in current edge
@@ -52,6 +55,13 @@ class PanelObject():
 			# Find location of verts in trailingEdge_verts list
 			self.wake_trailingVerts[i, 0] = np.where(self.trailingVerts == edge[0])[0][0]
 			self.wake_trailingVerts[i, 1] = np.where(self.trailingVerts == edge[1])[0][0]
+
+			edge_index      = self.trailingEdge[i]
+			edge_startIndex = self.mesh.edge_startIndex[edge_index]
+
+			self.trailingFaces[i, 0] = self.mesh.edge_faces[edge_startIndex]
+			if self.mesh.edge_nrFaces[edge_index] > 1:
+				self.trailingFaces[i, 1] = self.mesh.edge_faces[edge_startIndex + 1]
 
 		# Create wake mesh topology and intial data
 		self.wake_nrTrailingVerts = len(self.trailingVerts)
@@ -76,8 +86,9 @@ class PanelObject():
 				k += 4
 
 		# Generate a mesh for the wake
-		self.wake_mesh = Mesh.Mesh(verts, face_verts, face_nrVerts, simple=False)
-		self.wake_mesh.calculateFaceCoordinateSystem()
+		self.wake_mesh = Mesh.Mesh(verts, face_verts, face_nrVerts, simple=True)
+
+		self.wake_strength = np.zeros(self.wake_mesh.nrFaces)
 
 	def initializeWake(self, direction):
 		for i in range(self.wake_nrTrailingVerts):
@@ -86,10 +97,18 @@ class PanelObject():
 			for j in range(self.wake_nrVertsPrStrip):
 				self.wake_mesh.verts[i*self.wake_nrVertsPrStrip + j] = v0 + j*self.wake_panelLength*direction
 
+		self.wake_mesh.calculateFaceData()
+
 	def addViscousStrips(self, strip_topology, CL, CD):
 		self.strip_topology = strip_topology
 		self.strip_CL = CL
 		self.strip_CD = CD
+
+	def calculateForces(self):
+		self.force = np.zeros(3)
+
+		for i in range(self.mesh.nrFaces):
+			self.force = -self.Cp[i]*self.mesh.face_n[i]*self.mesh.face_area[i]
 
 def generateWingFrom2DProfile(x, y, Span, nrStrips, x0 = 0, y0 = 0, taperRatio = 1, spanDirection = 2):
 	# Close trailing edge gap if it exist

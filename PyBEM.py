@@ -7,6 +7,8 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__))+'/Computation')
 import PanelObject
 import Computation
 
+import matplotlib.pyplot as plt
+
 class PyBEM():
 	def __init__(self, panelObjectList):
 		self.panelObjects   = panelObjectList
@@ -52,33 +54,54 @@ class PyBEM():
 				j_stop = j_start + mesh.nrFaces
 
 				# Calculate influence on current ctrl points from current mesh
-				if panelObject.boundaryType == 'dirichlet':
-					if panelObject.liftingSurface:
-						A_c = Computation.influenceMatrix(ctrlMesh, mesh, 'doubletPotential')
-					else:
-						A_c = Computation.influenceMatrix(ctrlMesh, mesh, 'sourcePotential')
-				elif panelObject.boundaryType == 'newmann':
-					if panelObject.liftingSurface:
-						A_c = Computation.influenceMatrix(ctrlMesh, mesh, 'doubletVelocity')
-					else:
-						A_c = Computation.influenceMatrix(ctrlMesh, mesh, 'sourceVelocity')
+				if panelObject.liftingSurface:
+					if panelObject.boundaryType == 'dirichlet':
+						# Calculate influence from body mesh
+						A_local = Computation.influenceMatrix(ctrlMesh, mesh, 'doubletPotential')
+						A_wake  = Computation.influenceMatrix(ctrlMesh, self.panelObjects[j].wake_mesh, 'doubletPotential')
+					elif panelObject.boundaryType == 'newmann':
+						A_local = Computation.influenceMatrix(ctrlMesh, mesh, 'doubletVelocity')
+						A_wake  = Computation.influenceMatrix(ctrlMesh, self.panelObjects[j].wake_mesh, 'doubletVelocity')
+						
+					# Combine influence from individual panels to influence from strips
+					nrStrips        = self.panelObjects[j].wake_nrStrips
+					nrPanelsPrStrip = self.panelObjects[j].wake_nrPanelsPrStrip
+					A_strips        = Computation.reduceToStrips(A_wake, nrStrips, nrPanelsPrStrip, ctrlMesh.nrFaces)
+
+					for k in range(ctrlMesh.nrFaces):
+						for l in range(nrStrips):
+							faceIndex = self.panelObjects[j].trailingFaces[l]
+
+							n1     = mesh.face_n[faceIndex[0]]
+							n2     = mesh.face_n[faceIndex[1]]
+							A_local[k, faceIndex[0]] += A_strips[k, l]*np.sign(n1[1])
+							A_local[k, faceIndex[1]] += A_strips[k, l]*np.sign(n2[1])
+				else:
+					if panelObject.boundaryType == 'dirichlet':
+						A_local = Computation.influenceMatrix(ctrlMesh, mesh, 'sourcePotential')
+					elif panelObject.boundaryType == 'newmann':
+						A_local = Computation.influenceMatrix(ctrlMesh, mesh, 'sourceVelocity')
 				
 				# Put resulting influence matrix into global matrix
-				A[i_start:i_stop, j_start:j_stop] = A_c
+				A[i_start:i_stop, j_start:j_stop] = A_local
 
 				j_start += mesh.nrFaces
 
 			# Compute right side of linear system
-			if panelObject.boundaryType == 'dirichlet':
-				if panelObject.liftingSurface:
+			if panelObject.liftingSurface:
+				if panelObject.boundaryType == 'dirichlet':
 					panelObject.source_strength = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)/(4*np.pi)
-					A_source                    = Computation.influenceMatrix(ctrlMesh, ctrlMesh, 'sourcePotential')
-					b[i_start:i_stop]           = -np.dot(A_source, panelObject.source_strength)
-				else:
-					b[i_start:i_stop] = Computation.freeStreamPotential(self.Uinf, ctrlMesh)
 
-			elif panelObject.boundaryType == 'newmann':
-				b[i_start:i_stop] = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)
+					A_source          = Computation.influenceMatrix(ctrlMesh, ctrlMesh, 'sourcePotential')
+					b[i_start:i_stop] = -np.dot(A_source, panelObject.source_strength)
+				elif panelObject.boundaryType == 'newmann':
+					b[i_start:i_stop] = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)
+
+			else:
+				if panelObject.boundaryType == 'dirichlet':
+					b[i_start:i_stop] = Computation.freeStreamPotential(self.Uinf, ctrlMesh)
+				elif panelObject.boundaryType == 'newmann':
+					b[i_start:i_stop] = Computation.freeStreamNewmann(self.Uinf, ctrlMesh)
 
 			i_start += ctrlMesh.nrFaces
 
@@ -94,14 +117,30 @@ class PyBEM():
 		# Transfer global strength values to individual panel objects
 		i_start = 0
 		for i in range(self.nrPanelObjects):
-			i_stop = i_start + self.panelObjects[i].mesh.nrFaces
+			panelObject = self.panelObjects[i]
+			i_stop = i_start + panelObject.mesh.nrFaces
 
-			if self.panelObjects[i].liftingSurface:
-				self.panelObjects[i].doublet_strength = strength[i_start:i_stop]
+			if panelObject.liftingSurface:
+				panelObject.doublet_strength = strength[i_start:i_stop]
+
+				j_start = 0
+				for j in range(panelObject.wake_nrStrips):
+					j_stop = j_start + panelObject.wake_nrPanelsPrStrip
+
+					faceIndex = panelObject.trailingFaces[j]
+					n1 = self.panelObjects[i].mesh.face_n[faceIndex[0]]
+					n2 = self.panelObjects[i].mesh.face_n[faceIndex[1]]
+
+					stripStrength = panelObject.doublet_strength[faceIndex[0]]*np.sign(n1[1]) + panelObject.doublet_strength[faceIndex[1]]*np.sign(n2[1])
+					#stripStrength = panelObject.doublet_strength[faceIndex[0]] + panelObject.doublet_strength[faceIndex[1]]
+
+					panelObject.wake_strength[j_start:j_stop] = stripStrength
+
+					j_start += panelObject.wake_nrPanelsPrStrip
 			else:
-				self.panelObjects[i].source_strength = strength[i_start:i_stop]
+				panelObject.source_strength = strength[i_start:i_stop]
 
-			i_start += self.panelObjects[i].mesh.nrFaces
+			i_start += panelObject.mesh.nrFaces
 
 	def velocityAndPressure(self):
 		startTime = time.clock()
@@ -119,8 +158,11 @@ class PyBEM():
 				u += Computation.velocity(p, strength, mesh, 'sourceVelocity')
 
 				if self.panelObjects[j].liftingSurface:
-					strength = self.panelObjects[j].doublet_strength
+					strength      = self.panelObjects[j].doublet_strength
+					wake_strength = self.panelObjects[j].wake_strength
+					wake_mesh     = self.panelObjects[j].wake_mesh
 					u += Computation.velocity(p, strength, mesh, 'doubletVelocity')
+					u += Computation.velocity(p, wake_strength, wake_mesh, 'doubletVelocity') 
 
 			self.panelObjects[i].u = u[:, 0] + self.Uinf[0]
 			self.panelObjects[i].v = u[:, 1] + self.Uinf[1]
@@ -146,4 +188,10 @@ class PyBEM():
 			mesh.addFaceData('w', self.panelObjects[i].w)
 			mesh.addFaceData('U', self.panelObjects[i].U)
 
-			mesh.exportVTK('panlObject{:.0f}.vtp'.format(i))
+			mesh.exportVTK('panelObject{:.0f}.vtp'.format(i))
+
+			if self.panelObjects[i].liftingSurface:
+				mesh = self.panelObjects[i].wake_mesh
+				mesh.addFaceData('doublet_strength', self.panelObjects[i].wake_strength)
+
+				mesh.exportVTK('wakeObject{:.0f}.vtp'.format(i))
