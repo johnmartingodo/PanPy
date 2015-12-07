@@ -1,46 +1,50 @@
 import numpy as np
 np.set_printoptions(threshold=np.nan)
 import PanelObject
-import PyBEM
+import LiftingSurface
+import PanPy
 import FoilDatabase
 import Mesh
 
-x, y = FoilDatabase.readFile('naca0012.dat')
+import matplotlib.pyplot as plt
 
-alpha     = 5
+# ----------------------- Wing ------------------------------------
+# Settings
+foilFile  = 'ls417.dat'
+alpha     = 0
 alpha_rad = alpha*np.pi/180
-delta_y   = -1*np.sin(alpha_rad)
-delta_x   = delta_y*np.sin(alpha_rad)
+Asp       = 10
 
-Asp = 5
-wing = PanelObject.generateWingFrom2DProfile(x, y, Asp, 20)
-flatWing = PanelObject.generateFlatWingFrom2DProfile(x, y, 10, 20, 20)
-
-wing.mesh.rotate(np.array([0, 0, -alpha_rad]))
-wing.wake_mesh.translate(0, delta_y, 0)
-
-wing.wake_mesh.calculateFaceData()
-wing.mesh.calculateFaceData()
-
-wing.mesh.calculateFaceCoordinateSystem()
-wing.wake_mesh.calculateFaceCoordinateSystem()
-
-wing.liftingSurface = True
-wing.boundaryType = 'dirichlet'
+# Create wing geometry from foil database
+x, y = FoilDatabase.readFile(foilFile)
+wing = LiftingSurface.LiftingSurface(x, y, Asp, 30)
 
 
+# Rotate wing to correct angle of attack
+wing.rotate(0, 0, -alpha_rad)
 
-#cylinder = PanelObject.PanelObject(Mesh.importObj('cylinder.obj'))
-#cylinder.boundaryType = 'newmann'
-#cylinder.liftingSurface = False
+#wing.exportTestGeometry()
 
-sim = PyBEM.PyBEM([wing])
+# --------------------- Cylinder ------------------------------------
+# Create cylinder from mesh file
+cylinder = PanelObject.PanelObject(Mesh.importObj('cylinder.obj'))
 
-sim.runSimulation()
-#sim.deformWake()
+# --------------------- Run Simulation -----------------------------
+sim = PanPy.PanPy([wing])
 
-sim.velocityAndPressure()
-#wing.calculateVelocityAndPressure(sim.Uinf)
+sim.steadyStateDirichlet()
+
+#sim.velocityAndPressure()
+wing.dirichletVelocityAndPressure(sim.Uinf)
+
+# Extract pressure from mid strip
+faceIndices = wing.stripFaces[15]
+x = wing.mesh.face_center[faceIndices, 0]
+Cp = wing.Cp[faceIndices]
+
+plt.plot(x, -Cp)
+plt.show()
+
 wing.calculateForces()
 print('Forces on wing:', wing.force/Asp)
 CL2D = 2*np.pi*alpha_rad
